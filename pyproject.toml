@@ -1,0 +1,28 @@
+[build-system]
+requires = ["setuptools"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "last_q"
+readme = "README.md"
+description = "last_q for biometric concepts"
+classifiers = ["Programming Language :: Python :: 3.11"]
+requires-python = ">=3.11"
+dynamic = ["version", "dependencies"]
+
+[tool.setuptools]
+packages = [
+    "last_q",
+    "last_q.src",
+    "last_q.src.fprmodules",
+    "last_q.src.irismodules",
+    "last_q.models",
+    "last_q.scripts",
+    "last_q.data"
+]
+
+[tool.setuptools.dynamic]
+dependencies = { file = "requirements.txt" }
+
+[tool.pytest.ini_options]
+pythonpath = ["."]
