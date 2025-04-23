@@ -6,7 +6,6 @@ Created on Fri Apr 22 03:02:23 2016
 """
 
 import numpy as np
-
 # import math
 # import scipy.ndimage
 from frequest import frequest

@@ -6,7 +6,7 @@ from typing import Dict, List
 import numpy as np
 import pandas as pd
 import torch
-from torch import nn, optim, Tensor
+from torch import Tensor, nn, optim
 from torch.utils.data import DataLoader
 from torchinfo import summary
 from torchvision import transforms
@@ -31,6 +31,9 @@ def main():
       5. Run training loop with validation and early stopping.
       6. Save best checkpoint and training history.
     """
+    iris_root: Path = Path("../data/CASIA1-enhanced")
+    fp_root: Path = Path("../data/NIST301-augmented")
+    
     # ----- 1. Setup -----
     # Results directory and checkpoint path
     results_dir: Path = Path("results/pretrained")
@@ -51,19 +54,18 @@ def main():
     # Simple transform: convert PIL Image to FloatTensor [0,1]
     transform = transforms.ToTensor()
 
-    # Paths to enhanced iris and augmented fingerprint data
-    iris_root: Path = Path("../data/CASIA1-enhanced")
-    fp_root: Path = Path("../data/NIST301-augmented")
     # Fraction of samples for train and validation
     train_pct, val_pct = 0.7, 0.15
     samples = load(iris_root, fp_root, train_pct, val_pct)
 
     # Determine number of classes from loaded samples
-    n_classes: int = len({lbl for _, _, lbl in samples['train'] + samples['val'] + samples['test']})
+    n_classes: int = len(
+        {lbl for _, _, lbl in samples["train"] + samples["val"] + samples["test"]}
+    )
 
     # Create PyTorch datasets and loaders
-    train_ds = IrisFingerprintDataset(samples['train'], transform=transform)
-    val_ds   = IrisFingerprintDataset(samples['val'],   transform=transform)
+    train_ds = IrisFingerprintDataset(samples["train"], transform=transform)
+    val_ds = IrisFingerprintDataset(samples["val"], transform=transform)
     batch_size: int = 32
     train_loader: DataLoader = DataLoader(
         train_ds,
@@ -71,7 +73,7 @@ def main():
         shuffle=True,
         num_workers=4,
         pin_memory=True,
-        persistent_workers=True
+        persistent_workers=True,
     )
     val_loader: DataLoader = DataLoader(
         val_ds,
@@ -79,18 +81,18 @@ def main():
         shuffle=False,
         num_workers=4,
         pin_memory=True,
-        persistent_workers=True
+        persistent_workers=True,
     )
 
     # ----- 3. Model, loss, optimizer, scheduler -----
     # Select device: MPS > CUDA > CPU
     mps_ok: bool = (
-        hasattr(torch.backends, 'mps') and
-        torch.backends.mps.is_available() and
-        torch.backends.mps.is_built()
+        hasattr(torch.backends, "mps")
+        and torch.backends.mps.is_available()
+        and torch.backends.mps.is_built()
     )
     device: torch.device = torch.device(
-        'mps' if mps_ok else ('cuda' if torch.cuda.is_available() else 'cpu')
+        "mps" if mps_ok else ("cuda" if torch.cuda.is_available() else "cpu")
     )
     print(f"Using device: {device}")
 
@@ -103,7 +105,7 @@ def main():
     summary(
         model,
         input_data=(iris_sample, fp_sample),
-        col_names=("output_size", "num_params", "trainable")
+        col_names=("output_size", "num_params", "trainable"),
     )
 
     # Define loss criterion and optimizer
@@ -111,26 +113,17 @@ def main():
     optimizer: optim.Optimizer = optim.Adam(model.parameters(), lr=1e-2)
     # Scheduler that reduces LR when validation loss plateaus
     scheduler = optim.lr_scheduler.ReduceLROnPlateau(
-        optimizer,
-        mode='min',
-        factor=0.1,
-        patience=5,
-        min_lr=1e-5,
-        verbose=True
+        optimizer, mode="min", factor=0.1, patience=5, min_lr=1e-5, verbose=True
     )
 
     # ----- 4. Training loop -----
-    best_val_loss: float = float('inf')
+    best_val_loss: float = float("inf")
     since_improve: int = 0
     patience: int = 20
     max_epochs: int = 100
 
     # History logging
-    history: Dict[str, List[float]] = {
-        'train_loss': [],
-        'val_loss':   [],
-        'val_acc':    []
-    }
+    history: Dict[str, List[float]] = {"train_loss": [], "val_loss": [], "val_acc": []}
 
     for epoch in tqdm(range(1, max_epochs + 1), total=max_epochs, desc="Epochs"):
         # -- Training phase --
@@ -138,7 +131,7 @@ def main():
         total_train_loss: float = 0.0
         for (iris, fp), labels in train_loader:
             iris, fp, labels = iris.to(device), fp.to(device), labels.to(device)
-            logits: Tensor = model(iris, fp)            # [B, n_classes]
+            logits: Tensor = model(iris, fp)  # [B, n_classes]
             loss: Tensor = criterion(logits, labels)
 
             optimizer.zero_grad()
@@ -146,7 +139,7 @@ def main():
             optimizer.step()
             total_train_loss += loss.item()
         train_loss: float = total_train_loss / len(train_loader)
-        history['train_loss'].append(train_loss)
+        history["train_loss"].append(train_loss)
 
         # -- Validation phase --
         model.eval()
@@ -165,23 +158,26 @@ def main():
                 total += labels.size(0)
         val_loss: float = total_val_loss / len(val_loader)
         val_acc: float = correct / total
-        history['val_loss'].append(val_loss)
-        history['val_acc'].append(val_acc)
+        history["val_loss"].append(val_loss)
+        history["val_acc"].append(val_acc)
 
         # -- Scheduler & checkpointing --
         scheduler.step(val_loss)
-        status: str = ''
+        status: str = ""
         if val_loss < best_val_loss:
             best_val_loss = val_loss
             since_improve = 0
-            torch.save({
-                'epoch': epoch,
-                'model_state_dict': model.state_dict(),
-                'optimizer_state_dict': optimizer.state_dict(),
-                'scheduler_state_dict': scheduler.state_dict(),
-                'best_val_loss': best_val_loss
-            }, checkpoint_path)
-            status = '→ saved'
+            torch.save(
+                {
+                    "epoch": epoch,
+                    "model_state_dict": model.state_dict(),
+                    "optimizer_state_dict": optimizer.state_dict(),
+                    "scheduler_state_dict": scheduler.state_dict(),
+                    "best_val_loss": best_val_loss,
+                },
+                checkpoint_path,
+            )
+            status = "→ saved"
         else:
             since_improve += 1
 
@@ -203,5 +199,5 @@ def main():
     pd.DataFrame(history).to_csv(results_dir / "training_history.csv", index=False)
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     main()

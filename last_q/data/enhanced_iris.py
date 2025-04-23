@@ -1,15 +1,13 @@
 import os
 import warnings
-from concurrent.futures import ProcessPoolExecutor, as_completed
 from pathlib import Path
 from typing import Dict, List, Tuple
 
 import cv2
 import numpy as np
 from PIL import Image
-from tqdm import tqdm
 
-from .src.irismodules.fnc import normalize, segment
+from last_q.src.irismodules.fnc import normalize, segment
 
 # Suppress warnings from underlying libraries
 warnings.filterwarnings("ignore")
@@ -171,37 +169,3 @@ def process_and_save(
     # Save result
     Image.fromarray(enhanced).save(out_path)
     return str(out_path)
-
-
-if __name__ == "__main__":
-    # Base data directories
-    data_path = Path("../data")
-    assert data_path.exists(), f"Data path not found: {data_path}"
-    iris_data_path = data_path / "CASIA1"
-    output_path = data_path / "CASIA1-enhanced"
-    output_path.mkdir(parents=True, exist_ok=True)
-
-    # Parameters for segmentation and normalization
-    params: Dict[str, float] = {
-        "eyelashes_thres": 40,
-        "radial_res": 200,
-        "angular_res": 500,
-    }
-
-    # Read all image paths and labels
-    items = read_iris_db_paths(iris_data_path)
-
-    # Process images in parallel, collecting output paths
-    results: List[str] = []
-    with ProcessPoolExecutor() as executor:
-        futures = {
-            executor.submit(process_and_save, idx, item, output_path, params): idx
-            for idx, item in enumerate(items)
-        }
-        for future in tqdm(
-            as_completed(futures), total=len(futures), desc="Processing"
-        ):
-            outpath = future.result()
-            results.append(outpath)
-
-    print(f"Processed {len(results)} images to {output_path}.")

@@ -1,13 +1,13 @@
 import random
 import warnings
 from pathlib import Path
-from typing import Tuple, List
+from typing import List
 
 import numpy as np
 import pandas as pd
 import torch
 from pytorch_metric_learning import losses, miners
-from torch import optim, Tensor
+from torch import Tensor, optim
 from torch.utils.data import DataLoader
 from torchinfo import summary
 from torchvision import transforms
@@ -21,13 +21,18 @@ warnings.filterwarnings("ignore")
 
 
 def main():
-    """
-    Main entry point: prepares data, model, and training loop for the scratch network.
-    """
+    iris_root = Path("../data/CASAI1-enhanced") # might to be adjusted
+    fp_root = Path("../data/NIST301-augmented")
+    
+    if not iris_root.exists():
+        raise FileNotFoundError(f"Iris data path not found: {iris_root}")
+    if not fp_root.exists():
+        raise FileNotFoundError(f"Fingerprint data path not found: {fp_root}")
+
     # Directory setup for results and checkpoints
     results_dir = Path("results/from_scratch")
     results_dir.mkdir(parents=True, exist_ok=True)
-    checkpoint_path = results_dir / "best_from_scratch2.pth"
+    checkpoint_path = results_dir / "best_from_scratch.pth"
 
     # Fix random seeds for reproducibility
     SEED = 42
@@ -41,30 +46,40 @@ def main():
 
     # ---------- 0. Data transforms ----------
     transform = transforms.ToTensor()  # convert PIL images to FloatTensor [0,1]
-
-    # ---------- 1. Build data splits ----------
-    iris_root = Path("../data/CASIA1-enhanced")  # enhanced iris images
-    fp_root = Path("../data/NIST301-augmented") # augmented fingerprint images
     train_pct, val_pct = 0.7, 0.15
     samples = load(iris_root, fp_root, train_pct, val_pct)
 
     # Create PyTorch Datasets and DataLoaders
     train_ds = IrisFingerprintDataset(samples["train"], transform=transform)
-    val_ds   = IrisFingerprintDataset(samples["val"],   transform=transform)
+    val_ds = IrisFingerprintDataset(samples["val"], transform=transform)
     batch_size = 32
     train_loader = DataLoader(
-        train_ds, batch_size=batch_size, shuffle=True,
-        num_workers=4, pin_memory=True, persistent_workers=True
+        train_ds,
+        batch_size=batch_size,
+        shuffle=True,
+        num_workers=4,
+        pin_memory=True,
+        persistent_workers=True,
     )
     val_loader = DataLoader(
-        val_ds, batch_size=batch_size, shuffle=False,
-        num_workers=4, pin_memory=True, persistent_workers=True
+        val_ds,
+        batch_size=batch_size,
+        shuffle=False,
+        num_workers=4,
+        pin_memory=True,
+        persistent_workers=True,
     )
 
     # ---------- 2. Model, loss, optimizer, scheduler ----------
     # Select device: MPS > CUDA > CPU
-    mps_ok = hasattr(torch.backends, "mps") and torch.backends.mps.is_available() and torch.backends.mps.is_built()
-    device = torch.device("mps" if mps_ok else ("cuda" if torch.cuda.is_available() else "cpu"))
+    mps_ok = (
+        hasattr(torch.backends, "mps")
+        and torch.backends.mps.is_available()
+        and torch.backends.mps.is_built()
+    )
+    device = torch.device(
+        "mps" if mps_ok else ("cuda" if torch.cuda.is_available() else "cpu")
+    )
     print(f"Using device: {device}")
 
     # Instantiate the two-branch network
@@ -76,20 +91,19 @@ def main():
     summary(
         model,
         input_data=(iris_sample, fp_sample),
-        col_names=("output_size", "num_params", "trainable")
+        col_names=("output_size", "num_params", "trainable"),
     )
 
     # Metric learning components
-    miner = miners.BatchHardMiner()                        # hard example miner
-    loss_func = losses.TripletMarginLoss(margin=0.8)      # triplet loss
+    miner = miners.BatchHardMiner()  # hard example miner
+    loss_func = losses.TripletMarginLoss(margin=0.8)  # triplet loss
 
     # Optimizer only updates trainable params
     optimizer = optim.Adam(
         filter(lambda p: p.requires_grad, model.parameters()), lr=1e-3
     )
     scheduler = optim.lr_scheduler.ReduceLROnPlateau(
-        optimizer, mode="min", factor=0.1, patience=10,
-        min_lr=1e-5, verbose=True
+        optimizer, mode="min", factor=0.1, patience=10, min_lr=1e-5, verbose=True
     )
 
     # Optionally resume from checkpoint
@@ -103,7 +117,9 @@ def main():
         scheduler.load_state_dict(ckpt["scheduler_state_dict"])
         best_val_loss = ckpt.get("best_val_loss", best_val_loss)
         start_epoch = ckpt.get("epoch", start_epoch)
-        print(f"   Resuming from epoch {start_epoch} with best_val_loss={best_val_loss:.4e}")
+        print(
+            f"   Resuming from epoch {start_epoch} with best_val_loss={best_val_loss:.4e}"
+        )
 
     # Training hyperparameters
     max_epochs = 1000
@@ -112,19 +128,21 @@ def main():
 
     # Logs
     train_losses: List[float] = []
-    val_losses:   List[float] = []
-    val_accs:     List[float] = []
+    val_losses: List[float] = []
+    val_accs: List[float] = []
 
     # ---------- 3. Train & validate with 1-NN ----------
-    for epoch in tqdm(range(start_epoch, max_epochs + 1), total=max_epochs, desc="Epochs"):
+    for epoch in tqdm(
+        range(start_epoch, max_epochs + 1), total=max_epochs, desc="Epochs"
+    ):
         # --- Training Phase ---
         model.train()
         total_train_loss = 0.0
         for (iris, fp), labels in train_loader:
             iris, fp, labels = iris.to(device), fp.to(device), labels.to(device)
-            emb: Tensor = model(iris, fp)               # get embeddings
-            hard_pairs = miner(emb, labels)             # mine hard triplets
-            loss = loss_func(emb, labels, hard_pairs)   # compute triplet loss
+            emb: Tensor = model(iris, fp)  # get embeddings
+            hard_pairs = miner(emb, labels)  # mine hard triplets
+            loss = loss_func(emb, labels, hard_pairs)  # compute triplet loss
             optimizer.zero_grad()
             loss.backward()
             optimizer.step()
@@ -176,13 +194,16 @@ def main():
             best_val_loss = avg_val_loss
             since_improve = 0
             # Save checkpoint
-            torch.save({
-                "epoch": epoch,
-                "best_val_loss": best_val_loss,
-                "model_state_dict": model.state_dict(),
-                "optimizer_state_dict": optimizer.state_dict(),
-                "scheduler_state_dict": scheduler.state_dict(),
-            }, checkpoint_path)
+            torch.save(
+                {
+                    "epoch": epoch,
+                    "best_val_loss": best_val_loss,
+                    "model_state_dict": model.state_dict(),
+                    "optimizer_state_dict": optimizer.state_dict(),
+                    "scheduler_state_dict": scheduler.state_dict(),
+                },
+                checkpoint_path,
+            )
             status = "→ saved"
         else:
             since_improve += 1
@@ -202,11 +223,13 @@ def main():
             break
 
     # Persist training history to CSV
-    history = pd.DataFrame({
-        "train_loss": train_losses,
-        "val_loss": val_losses,
-        "val_1nn_acc": val_accs,
-    })
+    history = pd.DataFrame(
+        {
+            "train_loss": train_losses,
+            "val_loss": val_losses,
+            "val_1nn_acc": val_accs,
+        }
+    )
     history.to_csv(results_dir / "training_history.csv", index=False)
 
 

@@ -28,6 +28,9 @@ def main():
       4) Perform k-NN search and majority-vote predictions.
       5) Save predictions and confidence scores to CSV.
     """
+    iris_root = Path("../data/CASIA1-enhanced")
+    fp_root = Path("../data/NIST301-augmented")
+    
     # ----- 1. Setup and data -----
     # Path to checkpoint and fixed random seed
     checkpoint_path: str = "results/from_scratch/best_from_scratch.pth"
@@ -43,34 +46,41 @@ def main():
 
     # Load data splits
     transform = transforms.ToTensor()
-    iris_root = Path("../data/CASIA1-enhanced")
-    fp_root = Path("../data/NIST301-augmented")
     train_pct, val_pct = 0.7, 0.15
     samples = load(iris_root, fp_root, train_pct, val_pct)
 
     # Create datasets for train, validation, and test
-    train_ds = IrisFingerprintDataset(samples['train'], transform=transform)
-    val_ds   = IrisFingerprintDataset(samples['val'],   transform=transform)
-    test_ds  = IrisFingerprintDataset(samples['test'],  transform=transform)
+    train_ds = IrisFingerprintDataset(samples["train"], transform=transform)
+    val_ds = IrisFingerprintDataset(samples["val"], transform=transform)
+    test_ds = IrisFingerprintDataset(samples["test"], transform=transform)
 
     # DataLoaders (no shuffling for evaluation)
     batch_size: int = 32
-    train_loader = DataLoader(train_ds, batch_size=batch_size, shuffle=False,
-                              num_workers=4, pin_memory=True)
-    val_loader   = DataLoader(val_ds,   batch_size=batch_size, shuffle=False,
-                              num_workers=4, pin_memory=True)
-    test_loader  = DataLoader(test_ds,  batch_size=batch_size, shuffle=False,
-                              num_workers=4, pin_memory=True)
+    train_loader = DataLoader(
+        train_ds, batch_size=batch_size, shuffle=False, num_workers=4, pin_memory=True
+    )
+    val_loader = DataLoader(
+        val_ds, batch_size=batch_size, shuffle=False, num_workers=4, pin_memory=True
+    )
+    test_loader = DataLoader(
+        test_ds, batch_size=batch_size, shuffle=False, num_workers=4, pin_memory=True
+    )
 
     # Select device: MPS > CUDA > CPU
-    mps_ok = hasattr(torch.backends, 'mps') and torch.backends.mps.is_available() and torch.backends.mps.is_built()
-    device = torch.device('mps' if mps_ok else ('cuda' if torch.cuda.is_available() else 'cpu'))
+    mps_ok = (
+        hasattr(torch.backends, "mps")
+        and torch.backends.mps.is_available()
+        and torch.backends.mps.is_built()
+    )
+    device = torch.device(
+        "mps" if mps_ok else ("cuda" if torch.cuda.is_available() else "cpu")
+    )
     print(f"Using device: {device}")
 
     # Load model checkpoint
     model = TwoBranchScratchNet(emb_size=32).to(device)
     ckpt = torch.load(checkpoint_path, map_location=device)
-    model.load_state_dict(ckpt['model_state_dict'])
+    model.load_state_dict(ckpt["model_state_dict"])
     model.eval()  # set to evaluation mode
 
     # ----- 2. Build gallery embeddings -----
@@ -130,15 +140,13 @@ def main():
     print(f"6-NN accuracy on test set: {accuracy:.4%}")
 
     # ----- 5. Save results -----
-    results_df = pd.DataFrame({
-        'predicted': preds,
-        'confidence': confidences,
-        'actual': test_labels.numpy()
-    })
-    out_path = Path('results/from_scratch') / 'test_predictions.csv'
+    results_df = pd.DataFrame(
+        {"predicted": preds, "confidence": confidences, "actual": test_labels.numpy()}
+    )
+    out_path = Path("results/from_scratch") / "test_predictions.csv"
     results_df.to_csv(out_path, index=False)
     print(f"Saved predictions and confidences to {out_path}")
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     main()
