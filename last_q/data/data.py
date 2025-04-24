@@ -78,9 +78,7 @@ def load(
         for mode in ("train", "val", "test"):
             for i in iris_splits[mode]:
                 for j in fp_splits[mode]:
-                    assert (
-                        int(ips[i][:-8]) == int(fps[j][:-9]) == label
-                    ), "Mismatch for label"
+                    assert int(str(ips[i])[-11:-8]) == int(str(fps[j])[-12:-9]) == label, f'Mismatch in label: {label}'
                     samples[mode].append((ips[i], fps[j], label))
 
     return samples

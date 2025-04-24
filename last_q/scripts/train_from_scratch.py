@@ -21,13 +21,13 @@ warnings.filterwarnings("ignore")
 
 
 def main():
-    iris_root = Path("../data/CASAI1-enhanced") # might to be adjusted
+    iris_root = Path("../data/CASIA1-enhanced") # might to be adjusted
     fp_root = Path("../data/NIST301-augmented")
     
     if not iris_root.exists():
-        raise FileNotFoundError(f"Iris data path not found: {iris_root}")
+        raise FileNotFoundError(f"Iris data path not found: {iris_root.absolute()}")
     if not fp_root.exists():
-        raise FileNotFoundError(f"Fingerprint data path not found: {fp_root}")
+        raise FileNotFoundError(f"Fingerprint data path not found: {fp_root.absolute()}")
 
     # Directory setup for results and checkpoints
     results_dir = Path("results/from_scratch")
@@ -95,15 +95,18 @@ def main():
     )
 
     # Metric learning components
-    miner = miners.BatchHardMiner()  # hard example miner
-    loss_func = losses.TripletMarginLoss(margin=0.8)  # triplet loss
+    miner = miners.BatchEasyHardMiner(
+        pos_strategy=miners.BatchEasyHardMiner.HARD,
+        neg_strategy=miners.BatchEasyHardMiner.SEMIHARD,
+    )
+    loss_func = losses.TripletMarginLoss(margin=0.7)  # triplet loss
 
     # Optimizer only updates trainable params
     optimizer = optim.Adam(
         filter(lambda p: p.requires_grad, model.parameters()), lr=1e-3
     )
     scheduler = optim.lr_scheduler.ReduceLROnPlateau(
-        optimizer, mode="min", factor=0.1, patience=10, min_lr=1e-5, verbose=True
+        optimizer, mode="min", factor=0.1, patience=25, min_lr=1e-5, verbose=True
     )
 
     # Optionally resume from checkpoint
@@ -123,7 +126,7 @@ def main():
 
     # Training hyperparameters
     max_epochs = 1000
-    patience = 50
+    patience = 100
     since_improve = 0
 
     # Logs

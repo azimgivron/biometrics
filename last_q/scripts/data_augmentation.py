@@ -7,7 +7,8 @@ import torch
 from PIL import Image
 from torchvision import transforms
 from tqdm import tqdm
-
+from itertools import repeat
+import os
 from last_q.data.augment_fp import (AddGaussianNoise, Clamp, EnhanceFP,
                                     RandomThinning, augment_variants, read_DB)
 from last_q.data.enhanced_iris import process_and_save, read_iris_db_paths
@@ -106,18 +107,22 @@ def main():
 
     items = read_iris_db_paths(iris_data_path)
 
-    results = []
-    with ProcessPoolExecutor() as executor:
-        futures = {
-            executor.submit(process_and_save, idx, item, output_path, params): idx
-            for idx, item in enumerate(items)
-        }
-        for future in tqdm(
-            as_completed(futures), total=len(futures), desc=f"Processing iris images and saving at {output_path}"
-        ):
-            results.append(future.result())
+    max_workers = max_workers or os.cpu_count() or 1
 
-    print(f"Processing done !")
+    with ProcessPoolExecutor(max_workers=max_workers) as executor:
+        # map your function across the four argument streams, in chunks
+        _ = list(tqdm(
+            executor.map(
+                process_and_save,
+                range(len(items)),      # idx
+                items,                  # item
+                repeat(output_path),    # same output_path for each call
+                repeat(params),         # same params for each call
+                chunksize=10
+            ),
+            total=len(items),
+            desc=f"Processing iris images → {output_path}"
+        ))
 
 
 if __name__ == "__main__":

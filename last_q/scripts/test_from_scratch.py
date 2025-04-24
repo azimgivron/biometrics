@@ -9,6 +9,8 @@ import torch
 from torch import Tensor
 from torch.utils.data import DataLoader
 from torchvision import transforms
+import matplotlib.pyplot as plt
+from sklearn.manifold import TSNE
 
 from last_q.data.data import IrisFingerprintDataset, load
 from last_q.models.model_from_scratch import TwoBranchScratchNet
@@ -146,6 +148,41 @@ def main():
     out_path = Path("results/from_scratch") / "test_predictions.csv"
     results_df.to_csv(out_path, index=False)
     print(f"Saved predictions and confidences to {out_path}")
+    
+    # ----- 6. t-SNE visualization -----
+    # Stack embeddings and labels for visualization
+    all_embs = torch.cat([gallery_embeddings, test_embeddings], dim=0).numpy()
+    all_labels = np.concatenate([gallery_labels.numpy(), test_labels.numpy()])
+    is_test = np.concatenate([np.zeros(len(gallery_labels)), np.ones(len(test_labels))])
+
+    tsne = TSNE(n_components=2, random_state=SEED, perplexity=20)
+    embs_2d = tsne.fit_transform(all_embs)
+
+    fig = plt.figure(figsize=(8, 8))
+    cmap = plt.cm.get_cmap('jet', 100)
+
+    # Plot gallery points
+    plt.scatter(
+        embs_2d[is_test == 0, 0], embs_2d[is_test == 0, 1],
+        c=all_labels[is_test == 0], alpha=0.6, cmap=cmap
+    )
+    # Plot test points
+    scatter = plt.scatter(
+        embs_2d[is_test == 1, 0], embs_2d[is_test == 1, 1],
+        c=all_labels[is_test == 1], alpha=0.6, cmap=cmap
+    )
+    plt.legend()
+    plt.title('t-SNE of Embeddings (Gallery vs Test)')
+    plt.xlabel('t-SNE Dim 1')
+    plt.ylabel('t-SNE Dim 2')
+    cbar = fig.colorbar(scatter, orientation='horizontal',
+                    fraction=0.05, pad=0.1)
+    cbar.set_ticks(np.arange(0, 100, 10))
+    cbar.set_label("Labels")
+    plt.tight_layout()
+    tsne_path = Path("results/from_scratch") / "embeddings_tsne.png"
+    plt.savefig(tsne_path)
+    print(f"Saved t-SNE plot to {tsne_path}")
 
 
 if __name__ == "__main__":
