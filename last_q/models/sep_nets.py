@@ -25,19 +25,19 @@ class IrisNet(nn.Module):
         super().__init__()
         # Sequential feature extractor for iris modality
         self.features: nn.Sequential = nn.Sequential(
-            nn.Conv2d(1, 16, kernel_size=3, padding=1, bias=False),
+            nn.Conv2d(1, 16, kernel_size=3, padding=1),
             nn.BatchNorm2d(16),
-            nn.ReLU(inplace=True),
+            nn.ReLU(),
             nn.MaxPool2d(2),  # Downsample H,W by 2
             nn.Dropout2d(dropout_prob),
-            nn.Conv2d(16, 32, kernel_size=3, padding=1, bias=False),
+            nn.Conv2d(16, 32, kernel_size=3, padding=1),
             nn.BatchNorm2d(32),
-            nn.ReLU(inplace=True),
+            nn.ReLU(),
             nn.MaxPool2d(2),  # Downsample by another factor of 2
             nn.Dropout2d(dropout_prob),
-            nn.Conv2d(32, 64, kernel_size=3, padding=1, bias=False),
+            nn.Conv2d(32, 64, kernel_size=3, padding=1),
             nn.BatchNorm2d(64),
-            nn.ReLU(inplace=True),
+            nn.ReLU(),
             nn.AdaptiveAvgPool2d((1, 1)),  # Output spatial size [1,1]
             nn.Flatten(),  # → [B, 64]
         )
@@ -71,19 +71,19 @@ class FPNet(nn.Module):
         super().__init__()
         # Reuse same feature extractor structure
         self.features: nn.Sequential = nn.Sequential(
-            nn.Conv2d(1, 16, kernel_size=3, padding=1, bias=False),
+            nn.Conv2d(1, 16, kernel_size=3, padding=1),
             nn.BatchNorm2d(16),
-            nn.ReLU(inplace=True),
+            nn.ReLU(),
             nn.MaxPool2d(2),
             nn.Dropout2d(dropout_prob),
-            nn.Conv2d(16, 32, kernel_size=3, padding=1, bias=False),
+            nn.Conv2d(16, 32, kernel_size=3, padding=1),
             nn.BatchNorm2d(32),
-            nn.ReLU(inplace=True),
+            nn.ReLU(),
             nn.MaxPool2d(2),
             nn.Dropout2d(dropout_prob),
-            nn.Conv2d(32, 64, kernel_size=3, padding=1, bias=False),
+            nn.Conv2d(32, 64, kernel_size=3, padding=1),
             nn.BatchNorm2d(64),
-            nn.ReLU(inplace=True),
+            nn.ReLU(),
             nn.AdaptiveAvgPool2d((1, 1)),
             nn.Flatten(),  # → [B, 64]
         )
@@ -123,9 +123,9 @@ class MergerNet(nn.Module):
         super().__init__()
         # Define sequential merger
         self.merger: nn.Sequential = nn.Sequential(
-            nn.Linear(64 * 2, 64, bias=False),
+            nn.Linear(64 * 2, 64),
             nn.BatchNorm1d(64),
-            nn.ReLU(inplace=True),
+            nn.ReLU(),
             nn.Dropout(dropout_prob),
             nn.Linear(64, emb_size),
         )

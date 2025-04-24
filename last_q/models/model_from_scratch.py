@@ -15,56 +15,47 @@ class TwoBranchScratchNet(nn.Module):
         dropout_prob: Dropout probability applied in each branch and merger.
     """
 
-    def __init__(self, emb_size: int = 32, dropout_prob: float = 0.3) -> None:
+    def __init__(self, emb_size: int = 64, dropout_prob: float = 0.3) -> None:
         super().__init__()
-        # ── Iris branch: Conv→BN→ReLU→Pooling→Dropout stacks
-        self.branch_iris: nn.Sequential = nn.Sequential(
-            # Input [B,1,H,W] → [B,16,H,W]
-            nn.Conv2d(1, 16, kernel_size=3, padding=1, bias=False),
-            nn.BatchNorm2d(16),
-            nn.ReLU(inplace=True),
-            nn.MaxPool2d(2),  # Downsample by 2
-            nn.Dropout2d(dropout_prob),
-            # [B,16,H/2,W/2] → [B,32,H/2,W/2]
-            nn.Conv2d(16, 32, kernel_size=3, padding=1, bias=False),
-            nn.BatchNorm2d(32),
-            nn.ReLU(inplace=True),
-            nn.MaxPool2d(2),  # Downsample by 2 again
-            nn.Dropout2d(dropout_prob),
-            # [B,32,H/4,W/4] → [B,64,1,1] via adaptive pooling
-            nn.Conv2d(32, 64, kernel_size=3, padding=1, bias=False),
-            nn.BatchNorm2d(64),
-            nn.ReLU(inplace=True),
-            nn.AdaptiveAvgPool2d((1, 1)),
-            nn.Flatten(),  # → [B,64]
-        )
+        
+        def make():
+            return nn.Sequential(
+                nn.Conv2d(1, 16, kernel_size=4, stride=2, padding=1),
+                nn.BatchNorm2d(16),
+                nn.ReLU(),
+                nn.MaxPool2d(kernel_size=2),
+                nn.Dropout2d(dropout_prob),
+                nn.Conv2d(16, 32, kernel_size=4, stride=2, padding=1),
+                nn.ReLU(),
+                nn.BatchNorm2d(32),
+                nn.MaxPool2d(kernel_size=2),
+                nn.Dropout2d(dropout_prob),
+                nn.Conv2d(32, 32, kernel_size=4, stride=2, padding=1),
+                nn.ReLU(),
+                nn.BatchNorm2d(32),
+                nn.MaxPool2d(kernel_size=2),
+                nn.Flatten(),
+            )
+
+        # input size: 200, 500
+        self.branch_iris: nn.Sequential = make()
 
         # ── Fingerprint branch: same architecture as iris
-        self.branch_fp: nn.Sequential = nn.Sequential(
-            nn.Conv2d(1, 16, kernel_size=3, padding=1, bias=False),
-            nn.BatchNorm2d(16),
-            nn.ReLU(inplace=True),
-            nn.MaxPool2d(2),
-            nn.Dropout2d(dropout_prob),
-            nn.Conv2d(16, 32, kernel_size=3, padding=1, bias=False),
-            nn.BatchNorm2d(32),
-            nn.ReLU(inplace=True),
-            nn.MaxPool2d(2),
-            nn.Dropout2d(dropout_prob),
-            nn.Conv2d(32, 64, kernel_size=3, padding=1, bias=False),
-            nn.BatchNorm2d(64),
-            nn.ReLU(inplace=True),
-            nn.AdaptiveAvgPool2d((1, 1)),
-            nn.Flatten(),  # → [B,64]
-        )
+        # input size: 480, 320
+        self.branch_fp: nn.Sequential = make()
+        
+        def _get_flatten_size(branch, H, W):
+            x = torch.zeros(1, 1, H, W)
+            return branch(x).shape[-1]
 
-        # ── Joint head: merge 64+64 features → emb_size
+        iris_dim = _get_flatten_size(self.branch_iris, 200, 500)
+        fp_dim   = _get_flatten_size(self.branch_fp,   480, 320)
+        merger_in = iris_dim + fp_dim
+
         self.merger: nn.Sequential = nn.Sequential(
-            nn.Linear(128, 64, bias=False),
-            nn.BatchNorm1d(64),
-            nn.ReLU(inplace=True),
-            nn.Dropout(dropout_prob),
-            nn.Linear(64, emb_size),
+            nn.Linear(merger_in, 128),
+            nn.ReLU(),
+            nn.Linear(128, emb_size),
         )
 
     def forward(self, iris: Tensor, fp: Tensor) -> Tensor:
@@ -85,7 +76,6 @@ class TwoBranchScratchNet(nn.Module):
         # L2-normalize each branch's output
         iris_feat = F.normalize(iris_feat, p=2, dim=1)
         fp_feat = F.normalize(fp_feat, p=2, dim=1)
-
         # Concatenate and project
         merged: Tensor = torch.cat([iris_feat, fp_feat], dim=1)  # [B,128]
         emb: Tensor = self.merger(merged)  # [B,emb_size]

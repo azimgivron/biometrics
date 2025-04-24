@@ -83,7 +83,7 @@ def main():
     print(f"Using device: {device}")
 
     # Instantiate the two-branch network
-    model = TwoBranchScratchNet(emb_size=32).to(device)
+    model = TwoBranchScratchNet(emb_size=64).to(device)
 
     # Print model summary on a batch of data
     (iris_sample, fp_sample), _ = next(iter(train_loader))
@@ -96,11 +96,27 @@ def main():
 
     # Metric learning components
     miner = miners.BatchEasyHardMiner(
-        pos_strategy=miners.BatchEasyHardMiner.HARD,
-        neg_strategy=miners.BatchEasyHardMiner.SEMIHARD,
+        pos_strategy=miners.BatchEasyHardMiner.SEMIHARD,
+        neg_strategy=miners.BatchEasyHardMiner.HARD,
     )
     loss_func = losses.TripletMarginLoss(margin=0.7)  # triplet loss
 
+    # Optionally resume from checkpoint
+    start_epoch = 1
+    best_val_loss = float("inf")
+    if checkpoint_path.exists():
+        try:
+            print(f"→ Loading checkpoint from {checkpoint_path}")
+            ckpt = torch.load(checkpoint_path, map_location=device)
+            model.load_state_dict(ckpt["model_state_dict"])
+            best_val_loss = ckpt.get("best_val_loss", best_val_loss)
+            start_epoch = ckpt.get("epoch", start_epoch)
+            print(
+                f"   Resuming from epoch {start_epoch} with best_val_loss={best_val_loss:.4e}"
+            )
+        except RuntimeError:
+            pass
+    
     # Optimizer only updates trainable params
     optimizer = optim.Adam(
         filter(lambda p: p.requires_grad, model.parameters()), lr=1e-3
@@ -109,24 +125,9 @@ def main():
         optimizer, mode="min", factor=0.1, patience=25, min_lr=1e-5, verbose=True
     )
 
-    # Optionally resume from checkpoint
-    start_epoch = 1
-    best_val_loss = float("inf")
-    if checkpoint_path.exists():
-        print(f"→ Loading checkpoint from {checkpoint_path}")
-        ckpt = torch.load(checkpoint_path, map_location=device)
-        model.load_state_dict(ckpt["model_state_dict"])
-        optimizer.load_state_dict(ckpt["optimizer_state_dict"])
-        scheduler.load_state_dict(ckpt["scheduler_state_dict"])
-        best_val_loss = ckpt.get("best_val_loss", best_val_loss)
-        start_epoch = ckpt.get("epoch", start_epoch)
-        print(
-            f"   Resuming from epoch {start_epoch} with best_val_loss={best_val_loss:.4e}"
-        )
-
     # Training hyperparameters
-    max_epochs = 1000
-    patience = 100
+    max_epochs = 100
+    patience = 60
     since_improve = 0
 
     # Logs

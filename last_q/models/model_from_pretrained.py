@@ -63,15 +63,15 @@ class TwoBranchEfficientNet(nn.Module):
         # Convolutional head after merging branches
         self.post_merge_conv = nn.Sequential(
             nn.Conv2d(hidden_dim * 2 // 4, hidden_dim * 2 // 8, kernel_size=1),
-            nn.ReLU(inplace=True),
+            nn.ReLU(),
             nn.Conv2d(hidden_dim * 2 // 8, hidden_dim * 2 // 16, kernel_size=1),
-            nn.ReLU(inplace=True),
+            nn.ReLU(),
         )
 
         # Final MLP classifier
         self.merger = nn.Sequential(
             nn.Linear(hidden_dim * 2 // 16, hidden_dim * 2 // 32),
-            nn.ReLU(inplace=True),
+            nn.ReLU(),
             nn.Linear(hidden_dim * 2 // 32, n_classes),
         )
 
