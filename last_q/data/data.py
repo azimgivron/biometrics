@@ -84,6 +84,52 @@ def load(
     return samples
 
 
+
+def load_fp_only(
+    fp_root: Path, train_pct: float, val_pct: float
+) -> Dict[str, List[Tuple[Path, Path, int]]]:
+    """
+    Load fingerprint samples, splitting into train/val/test.
+
+    Args:
+        fp_root: Path to root folder of fingerprint images by label (000–999).
+        train_pct: Fraction of each label's samples for training (0<train_pct<1).
+        val_pct: Fraction of each label's samples for validation (0<val_pct<1).
+
+    Returns:
+        Dictionary mapping 'train', 'val', 'test' to lists of tuples
+        (iris_path, fingerprint_path, label).
+    """
+    samples: Dict[str, List[Tuple[Path, Path, int]]] = {
+        "train": [],
+        "val": [],
+        "test": [],
+    }
+
+    # Iterate over each label directory in the iris dataset
+    for label_dir in sorted(fp_root.iterdir()):
+        if not label_dir.is_dir():
+            continue
+
+        label = int(label_dir.name)  # Convert folder name to integer label
+        # Find all iris and fingerprint files for this label
+        fps = sorted((fp_root / f"{label:03d}").glob("*.png"))
+        n = len(fps)
+        tn = math.floor(train_pct * n)  # Number of training samples
+        vn = math.ceil(val_pct * n)  # Number of validation samples
+        # Basic sanity checks
+        assert tn > 0 and vn > 0 and (tn + vn) < n, "Invalid split proportions"
+
+        # Generate random splits for iris and fingerprint independently
+        fp_splits = make_splits(n, tn, vn)
+
+        # Pair each iris index with each fingerprint index in the same split
+        for mode in ("train", "val", "test"):
+            for i in fp_splits[mode]:
+                samples[mode].append((fps[i], label))
+    return samples
+
+
 class IrisFingerprintDataset(Dataset):
     """
     PyTorch Dataset for paired iris and fingerprint images.
@@ -115,3 +161,33 @@ class IrisFingerprintDataset(Dataset):
             fp = self.transform(fp)
         # Return paired images and label
         return (iris, fp), label
+
+class FingerprintDataset(Dataset):
+    """
+    PyTorch Dataset for paired iris and fingerprint images.
+
+    Each sample consists of a tuple ((iris_tensor, fp_tensor), label).
+
+    Args:
+        samples: List of tuples (iris_path, fingerprint_path, label).
+        transform: Callable to apply to both images (e.g., normalization, augment).
+    """
+
+    def __init__(self, samples: List[Tuple[Path, Path, int]], transform=None) -> None:
+        self.samples = samples
+        self.transform = transform
+
+    def __len__(self) -> int:
+        # Total number of paired samples
+        return len(self.samples)
+
+    def __getitem__(self, idx: int) -> Tuple[Tuple[Image.Image, Image.Image], int]:
+        # Retrieve file paths and label for this index
+        fp_p, label = self.samples[idx]
+        # Load grayscale images
+        fp = Image.open(fp_p).convert("L")
+        # Apply shared transform if provided
+        if self.transform:
+            fp = self.transform(fp)
+        # Return paired images and label
+        return fp, label
