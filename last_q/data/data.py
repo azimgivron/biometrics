@@ -27,6 +27,24 @@ def make_splits(n: int, tn: int, vn: int) -> Dict[str, np.ndarray]:
     test_idx = np.sort(perm[tn + vn :])
     return {"train": train_idx, "val": val_idx, "test": test_idx}
 
+def make_splits2(n: int, tn: int) -> Dict[str, np.ndarray]:
+    """
+    Randomly partition indices [0..n) into train, val, and test sets.
+
+    Args:
+        n: Total number of samples.
+        tn: Number of training samples.
+
+    Returns:
+        Dictionary with keys 'train', 'val' mapping to sorted index arrays.
+    """
+    # Generate a random permutation of indices
+    perm = np.random.permutation(n)
+    # First tn are training, next vn are validation, rest are test
+    train_idx = np.sort(perm[:tn])
+    val_idx = np.sort(perm[tn:])
+    return {"train": train_idx, "val": val_idx}
+
 
 def load(
     iris_root: Path, fp_root: Path, train_pct: float, val_pct: float
@@ -86,7 +104,7 @@ def load(
 
 
 def load_fp_only(
-    fp_root: Path, train_pct: float, val_pct: float
+    fp_root: Path, train_pct: float
 ) -> Dict[str, List[Tuple[Path, Path, int]]]:
     """
     Load fingerprint samples, splitting into train/val/test.
@@ -94,16 +112,14 @@ def load_fp_only(
     Args:
         fp_root: Path to root folder of fingerprint images by label (000–999).
         train_pct: Fraction of each label's samples for training (0<train_pct<1).
-        val_pct: Fraction of each label's samples for validation (0<val_pct<1).
 
     Returns:
-        Dictionary mapping 'train', 'val', 'test' to lists of tuples
+        Dictionary mapping 'train', 'val' to lists of tuples
         (iris_path, fingerprint_path, label).
     """
     samples: Dict[str, List[Tuple[Path, Path, int]]] = {
         "train": [],
         "val": [],
-        "test": [],
     }
 
     # Iterate over each label directory in the iris dataset
@@ -116,15 +132,14 @@ def load_fp_only(
         fps = sorted((fp_root / f"{label:03d}").glob("*.png"))
         n = len(fps)
         tn = math.floor(train_pct * n)  # Number of training samples
-        vn = math.ceil(val_pct * n)  # Number of validation samples
         # Basic sanity checks
-        assert tn > 0 and vn > 0 and (tn + vn) < n, "Invalid split proportions"
+        assert tn < n, "Invalid split proportions"
 
         # Generate random splits for iris and fingerprint independently
-        fp_splits = make_splits(n, tn, vn)
+        fp_splits = make_splits2(n, tn)
 
         # Pair each iris index with each fingerprint index in the same split
-        for mode in ("train", "val", "test"):
+        for mode in ("train", "val"):
             for i in fp_splits[mode]:
                 samples[mode].append((fps[i], label))
     return samples

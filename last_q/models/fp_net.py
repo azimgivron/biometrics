@@ -33,7 +33,7 @@ class FPNet(nn.Module):
             nn.Conv2d(64, 128, kernel_size=3, stride=2, padding=1),
             nn.BatchNorm2d(128),
             nn.ReLU(),
-            nn.MaxPool2d(kernel_size=2),
+            nn.AdaptiveAvgPool2d((1,1)),
             nn.Flatten(),
         )
 

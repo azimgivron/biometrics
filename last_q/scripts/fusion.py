@@ -28,7 +28,7 @@ def main():
         if not path.exists():
             raise FileNotFoundError(f"Data path not found: {path.absolute()}")
 
-    results_dir = Path("results/fp-iris")
+    results_dir = Path("results/fusion")
     results_dir.mkdir(parents=True, exist_ok=True)
     checkpoint_path = results_dir / "best_model.pth"
 
@@ -67,7 +67,7 @@ def main():
     # Model
     fp_model = FPNet().to(device)
     iris_model = IrisNet().to(device)
-    fusion_model = FusionNet(n_classes=100, input_size=1792).to(device)
+    fusion_model = FusionNet(n_classes=100, input_size=800).to(device)
 
     # Summary
     (iri_sample, fp_sample), _ = next(iter(train_loader))
@@ -76,7 +76,7 @@ def main():
     summary(iris_model, input_data=(iri_sample,))
     
     # If FPNet produces embeddings, you would need a linear head for classification:
-    summary(fusion_model, input_size=((batch_size, 672), (batch_size, 1120)), device=device)
+    summary(fusion_model, input_size=((batch_size, 128), (batch_size, 672)), device=device)
 
     # Resume
     start_epoch = 1

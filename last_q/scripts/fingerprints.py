@@ -20,15 +20,13 @@ warnings.filterwarnings("ignore")
 
 
 def main():
-    iris_root = Path("../data/CASIA1-enhanced")  # adjust as needed
-    fp_root = Path("../data/NIST301-augmented")
-    for path in (iris_root, fp_root):
-        if not path.exists():
-            raise FileNotFoundError(f"Data path not found: {path.absolute()}")
+    fp_root = Path("../data/NIST301-augmented2")
+    if not fp_root.exists():
+        raise FileNotFoundError(f"Data path not found: {fp_root.absolute()}")
 
     results_dir = Path("results/fp")
     results_dir.mkdir(parents=True, exist_ok=True)
-    checkpoint_path = results_dir / "best_model.pth"
+    checkpoint_path = results_dir / "best_model2.pth"
 
     # Reproducibility
     SEED = 42
@@ -42,8 +40,8 @@ def main():
 
     # Data
     transform = transforms.ToTensor()
-    train_pct, val_pct = 0.8, 0.19
-    samples = load_fp_only(fp_root, train_pct, val_pct)
+    train_pct = 0.85
+    samples = load_fp_only(fp_root, train_pct)
     train_ds = FingerprintDataset(samples["train"], transform=transform)
     val_ds = FingerprintDataset(samples["val"], transform=transform)
 
@@ -66,13 +64,13 @@ def main():
     model = FPNet().to(device)
 
     # Summary
-    (_, fp_sample), _ = next(iter(train_loader))
+    fp_sample, _ = next(iter(train_loader))
     fp_sample = fp_sample.to(device)
     summary(model, input_data=(fp_sample,), col_names=("output_size", "num_params", "trainable"))
     
     # If FPNet produces embeddings, you would need a linear head for classification:
     num_classes = 100
-    classifier = nn.Linear(1120, num_classes)
+    classifier = nn.Linear(128, num_classes)
     nn.init.kaiming_normal_(
         classifier.weight,
         mode='fan_out',              # recommended for Linear/Conv when followed by ReLU
@@ -80,7 +78,7 @@ def main():
     )
     nn.init.zeros_(classifier.bias)
     classifier = classifier.to(device)
-    summary(classifier, input_size=(batch_size, 1120), device=device)
+    summary(classifier, input_size=(batch_size, 128), device=device)
 
     # Resume
     start_epoch = 1
@@ -92,6 +90,7 @@ def main():
         best_val_loss = ckpt.get("best_val_loss", best_val_loss)
         start_epoch = ckpt.get("epoch", start_epoch)
         print(f"→ Resuming from epoch {start_epoch}, best_val_loss={best_val_loss:.4e}")
+    checkpoint_path = results_dir / "best_model.pth"
 
     # Loss, optim, scheduler
     criterion = nn.CrossEntropyLoss()
@@ -99,12 +98,12 @@ def main():
         list(model.parameters()) + list(classifier.parameters()), lr=1e-2
     )
     scheduler = optim.lr_scheduler.ReduceLROnPlateau(
-        optimizer, mode="min", factor=0.1, patience=20, min_lr=1e-5, verbose=True
+        optimizer, mode="min", factor=0.1, patience=10, min_lr=1e-5, verbose=True
     )
 
     # Training settings
     max_epochs = 1000
-    patience = 100
+    patience = 30
     no_improve = 0
 
     train_losses, val_losses, val_accs = [], [], []

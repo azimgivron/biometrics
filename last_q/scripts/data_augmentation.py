@@ -28,8 +28,8 @@ def main():
     args = parser.parse_args()
     
     # Fix random seeds for reproducibility
-    np.random.seed(0)
-    torch.manual_seed(0)
+    np.random.seed(2)
+    torch.manual_seed(2)
     
     if args.nist301_dir is not None:
         fp_path: Path = args.nist301_dir
@@ -45,22 +45,22 @@ def main():
             [
                 transforms.ToPILImage(),
                 transforms.RandomAffine(
-                    degrees=180,
-                    translate=(0.1, 0.1),
-                    scale=(0.9, 1.1),
+                    degrees=200,
+                    translate=(0.15, 0.15),
+                    scale=(.9, 1.2),
                     shear=10,
                     fill=255,
                 ),
                 transforms.RandomHorizontalFlip(p=0.5),
                 transforms.ToTensor(),
-                AddGaussianNoise(0.0, 0.05),
+                AddGaussianNoise(0.0, 0.07),
                 Clamp(),
                 EnhanceFP(fe=FingerprintImageEnhancer()),
-                RandomThinning(p=0.4, threshold=128, max_thickness=5),
+                RandomThinning(p=0.5, threshold=128, max_thickness=5),
             ]
         )
 
-        num_augs = 6
+        num_augs = 30
         args_list = [(img, num_augs, train_transforms) for img in fp_images]
 
         # Generate augmented variants in parallel
@@ -71,7 +71,7 @@ def main():
             )
 
         # Prepare output directory
-        generated_root = fp_path.parent / f"{fp_path.name}-augmented"
+        generated_root = fp_path.parent / f"{fp_path.name}-augmented2"
         generated_root.mkdir(parents=True, exist_ok=True)
 
         # Save originals and augmentations
@@ -91,7 +91,7 @@ def main():
             # Save each augmented variant
             for idx, var in enumerate(variants, start=1):
                 arr = var if var.dtype == np.uint8 else (var * 255).astype(np.uint8)
-                Image.fromarray(arr, mode="L").save(label_dir / f"{label}_aug{idx}.png")
+                Image.fromarray(arr, mode="L").save(label_dir / f"{label}_aug{idx+230}.png")
     
     if args.casia1_dir is not None:
         iris_data_path = args.casia1_dir
