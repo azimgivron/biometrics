@@ -26,7 +26,7 @@ def main():
 
     results_dir = Path("results/fp")
     results_dir.mkdir(parents=True, exist_ok=True)
-    checkpoint_path = results_dir / "best_model2.pth"
+    checkpoint_path = results_dir / "best_model.pth"
 
     # Reproducibility
     SEED = 42
@@ -90,7 +90,6 @@ def main():
         best_val_loss = ckpt.get("best_val_loss", best_val_loss)
         start_epoch = ckpt.get("epoch", start_epoch)
         print(f"→ Resuming from epoch {start_epoch}, best_val_loss={best_val_loss:.4e}")
-    checkpoint_path = results_dir / "best_model.pth"
 
     # Loss, optim, scheduler
     criterion = nn.CrossEntropyLoss()

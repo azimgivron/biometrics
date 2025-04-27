@@ -1,12 +1,12 @@
 import random
 import warnings
 from pathlib import Path
-from typing import List
+from typing import Any, Dict, Tuple
 
 import numpy as np
 import pandas as pd
 import torch
-from torch import Tensor
+from torch import Tensor, nn
 from torch.utils.data import DataLoader
 from torchvision import transforms
 from torchinfo import summary
@@ -15,130 +15,176 @@ from last_q.data.data import IrisFingerprintDataset, load
 from last_q.models.fp_net import FPNet
 from last_q.models.iris_net import IrisNet
 from last_q.models.fusion_net import FusionNet
-# Suppress warnings for clean output
+
 warnings.filterwarnings("ignore")
+
+
+def get_device() -> torch.device:
+    """
+    Select the best available device: MPS > CUDA > CPU.
+
+    Returns:
+        torch.device: The selected device.
+    """
+    if hasattr(torch.backends, "mps") and torch.backends.mps.is_available() and torch.backends.mps.is_built():
+        return torch.device("mps")
+    if torch.cuda.is_available():
+        return torch.device("cuda")
+    return torch.device("cpu")
+
+
+def load_checkpoint(path: Path, device: torch.device) -> dict:
+    """
+    Load a model checkpoint from disk into CPU/GPU memory.
+
+    Args:
+        path (Path): Path to the .pth checkpoint file.
+        device (torch.device): Device for loading the checkpoint.
+
+    Returns:
+        dict: The loaded checkpoint dictionary.
+
+    Raises:
+        FileNotFoundError: If the checkpoint file does not exist.
+    """
+    if not path.exists():
+        raise FileNotFoundError(f"Checkpoint not found at {path}")
+    return torch.load(path, map_location=device)
+
+
+def init_models(device: torch.device,
+                num_classes: int = 100,
+                fusion_input: int = 800) -> dict:
+    """
+    Initialize the iris, fingerprint, and fusion models plus standalone classifiers.
+
+    Args:
+        device (torch.device): Device to move models to.
+        num_classes (int): Number of output classes for classifiers.
+        fusion_input (int): Combined feature-size input for fusion network.
+
+    Returns:
+        dict: A mapping of model names to instantiated PyTorch modules.
+    """
+    return {
+        "iris": IrisNet().to(device),
+        "iris_fusion": IrisNet().to(device),
+        "fp": FPNet().to(device),
+        "fp_fusion": FPNet().to(device),
+        "fusion": FusionNet(n_classes=num_classes, input_size=fusion_input).to(device),
+        "iris_cls": nn.Linear(672, num_classes).to(device),
+        "fp_cls": nn.Linear(128, num_classes).to(device),
+    }
+
+
+def evaluate(model: str,
+             loader: DataLoader,
+             device: torch.device,
+             out_path: Path,
+             models: Dict[str, Any]) -> None:
+    """
+    Evaluate a model+head on the test loader, compute accuracy, and save probabilities.
+
+    Args:
+        model (str): Model type.
+        loader (DataLoader): DataLoader for test data.
+        device (torch.device): Device for computation.
+        out_path (Path): File path to save the CSV of probabilities and labels.
+        models (Dict[str, Any]): The models.
+    """
+    preds, labels = [], []
+    correct = total = 0
+
+    with torch.no_grad():
+        for (iris, fp), y in loader:
+            iris, fp, y = iris.to(device), fp.to(device), y.to(device)
+
+            # Compute embeddings
+            if model == "fusion":
+                fp_emb = models["fp_fusion"](fp)
+                iris_emb = models["iris_fusion"](iris)
+                logits = models["fusion"](fp_emb, iris_emb)
+            elif model == "fp":
+                emb = models["fp"](fp)
+                logits = models["fp_cls"](emb)
+            else:  # iris model
+                emb = models["iris"](iris)
+                logits = models["iris_cls"](emb)
+            
+            preds.append(logits)
+            labels.append(y)
+            pred = logits.argmax(dim=1)
+            correct += (pred == y).sum().item()
+            total += y.size(0)
+
+    acc = correct / total
+    print(f"{model.capitalize()} Accuracy: {acc * 100:.3f}%")
+
+    probs = torch.softmax(torch.cat(preds), dim=1).cpu().numpy()
+    df = pd.DataFrame(probs, columns=[f"class_{i}_score" for i in range(probs.shape[1])])
+    df["actual"] = torch.cat(labels).cpu().numpy()
+
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    df.to_csv(out_path, index=False)
+    print(f"Saved results to {out_path}")
 
 
 def main():
     """
-    Evaluate a trained TwoBranchScratchNet on test data using k-NN retrieval.
-
-    Steps:
-      1) Load test, train, and validation sets.
-      2) Build gallery embeddings from train+val.
-      3) Compute embeddings for test set.
-      4) Perform k-NN search and majority-vote predictions.
-      5) Save predictions and confidence scores to CSV.
+    Main script to:
+      1) Set up seeds and device.
+      2) Load data splits and DataLoader.
+      3) Initialize models and load checkpoint.
+      4) Print model summaries.
+      5) Evaluate fusion, iris-only, and fp-only models.
     """
+    # ---- Config ----
     iris_root = Path("../data/CASIA1-enhanced")
     fp_root = Path("../data/NIST301-augmented")
-    
-    # Path to checkpoint and fixed random seed
-    checkpoint_path = Path("results/fusion/best_model.pth")
-    SEED: int = 42
-    random.seed(SEED)
-    np.random.seed(SEED)
-    torch.manual_seed(SEED)
+    batch_size = 32
+    train_pct, val_pct = 0.7, 0.15
+    num_classes = 100
+
+    seed = 42
+    random.seed(seed)
+    np.random.seed(seed)
+    torch.manual_seed(seed)
     if torch.cuda.is_available():
-        torch.cuda.manual_seed_all(SEED)
-    # Ensure deterministic behavior
+        torch.cuda.manual_seed_all(seed)
     torch.backends.cudnn.deterministic = True
     torch.backends.cudnn.benchmark = False
-
-    # Load data splits
-    transform = transforms.ToTensor()
-    train_pct, val_pct = 0.7, 0.15
-    samples = load(iris_root, fp_root, train_pct, val_pct)
-
-    test_ds = IrisFingerprintDataset(samples["test"], transform=transform)
-
-    # DataLoaders (no shuffling for evaluation)
-    batch_size: int = 32
-    test_loader = DataLoader(
-        test_ds, batch_size=batch_size, shuffle=False, num_workers=4, pin_memory=True
-    )
-
-    # Select device: MPS > CUDA > CPU
-    mps_ok = (
-        hasattr(torch.backends, "mps")
-        and torch.backends.mps.is_available()
-        and torch.backends.mps.is_built()
-    )
-    device = torch.device(
-        "mps" if mps_ok else ("cuda" if torch.cuda.is_available() else "cpu")
-    )
+    
+    device = get_device()
     print(f"Using device: {device}")
 
-    # Model
-    fp_model = FPNet().to(device)
-    iris_model = IrisNet().to(device)
-    fusion_model = FusionNet(n_classes=100, input_size=800).to(device)
+    # ---- Data ----
+    samples = load(iris_root, fp_root, train_pct, val_pct)
+    test_ds = IrisFingerprintDataset(samples["test"], transform=transforms.ToTensor())
+    test_loader = DataLoader(test_ds, batch_size=batch_size, shuffle=False, num_workers=4, pin_memory=True)
 
-    # Summary
-    (iri_sample, fp_sample), _ = next(iter(test_loader))
-    iri_sample, fp_sample = iri_sample.to(device), fp_sample.to(device)
-    summary(fp_model, input_data=(fp_sample,))
-    summary(iris_model, input_data=(iri_sample,))
+    # ---- Models & Checkpoint ----
+    models = init_models(device, num_classes=num_classes)
+    ckpt_path = Path("results/fusion/best_model.pth")
+    ckpt = load_checkpoint(ckpt_path, device)
+    models["iris_fusion"].load_state_dict(ckpt["iris_model_state_dict"])
+    models["fp_fusion"].load_state_dict(ckpt["fp_model_state_dict"])
+    models["fusion"].load_state_dict(ckpt["fusion_model_state_dict"])
+    ckpt_path = Path("results/iris/best_model.pth")
+    ckpt = load_checkpoint(ckpt_path, device)
+    models["iris"].load_state_dict(ckpt["model_state_dict"])
+    models["iris_cls"].load_state_dict(ckpt["classifier_state_dict"])
+    ckpt_path = Path("results/fp/best_model.pth")
+    ckpt = load_checkpoint(ckpt_path, device)
+    models["fp"].load_state_dict(ckpt["model_state_dict"])
+    models["fp_cls"].load_state_dict(ckpt["classifier_state_dict"])
     
-    # If FPNet produces embeddings, you would need a linear head for classification:
-    summary(fusion_model, input_size=((batch_size, 128), (batch_size, 672)), device=device)
-
-    if checkpoint_path.exists():
-        ckpt = torch.load(checkpoint_path, map_location=device)
-        iris_model.load_state_dict(ckpt["iris_model_state_dict"])
-        fp_model.load_state_dict(ckpt["fp_model_state_dict"])
-        fusion_model.load_state_dict(ckpt["fusion_model_state_dict"])
-        best_val_loss = ckpt["best_val_loss"]
-        start_epoch = ckpt["epoch"]
-        print(f"→ Resuming from epoch {start_epoch}, best_val_loss={best_val_loss:.4e}")
-    ckpt = torch.load(checkpoint_path, map_location=device)
-
-    fusion_model.eval()
-    iris_model.eval()
-    fp_model.eval()
-        
-    preds: List[Tensor] = []
-    test_labels: List[Tensor] = []
-    correct, total = 0, 0
-    with torch.no_grad():
-        # Iterate over training and validation loaders
-        for (iris, fp), labels in test_loader:
-            # Move inputs to device
-            iris, fp, labels = iris.to(device), fp.to(device), labels.to(device)
-            # Compute embeddings
-            fp_emb = fp_model(fp)
-            iris_emb = iris_model(iris)
-            logits = fusion_model(fp_emb, iris_emb)
-
-            preds.append(logits)
-            test_labels.append(labels)
-            
-            pred = logits.argmax(dim=1)
-            correct += (pred == labels).sum().item()
-            total += labels.size(0)
-
-    acc = correct / total
-    print(f"Accuracy: {acc*100:.3f}%")
-
-    preds = torch.cat(preds, dim=0)         # shape [N, C]
-    test_labels = torch.cat(test_labels, dim=0)  # shape [N]
-    probs = torch.softmax(preds, dim=1)     # shape [N, C]
-    probs_np = probs.cpu().numpy()          # shape [N, C]
-    num_classes = probs_np.shape[1]
-    col_names = [f"class_{i}_score" for i in range(num_classes)]
-
-    results_df = pd.DataFrame(probs_np, columns=col_names)
-    results_df["actual"] = test_labels.cpu().numpy()
-    print(results_df.head())
-
-    # 4) Save to CSV
-    out_dir = Path("results/eval")
-    out_dir.mkdir(parents=True, exist_ok=True)
-    out_path = out_dir / "test_predictions_full_dist.csv"
-    results_df.to_csv(out_path, index=False)
-    print(f"Saved full score distributions and labels to {out_path}")
-
-
+    for _, model in models.items():
+        model.eval()
+    
+    # ---- Evaluation ----
+    evaluate("fusion", test_loader, device, Path("results/eval/fusion_evaluation.csv"), models)
+    evaluate("iris", test_loader, device, Path("results/eval/iris_evaluation.csv"), models)
+    evaluate("fp", test_loader, device, Path("results/eval/fp_evaluation.csv"), models)
 
 if __name__ == "__main__":
     main()
